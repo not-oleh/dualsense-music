@@ -7,6 +7,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var child: Process?
     private var status = "Starting…"
+    private var needsPermission = false
     private let saved = UserDefaults.standard
 
     private var on: Bool { get { saved.object(forKey: "on") as? Bool ?? true } set { saved.set(newValue, forKey: "on") } }
@@ -38,14 +39,22 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         p.standardOutput = pipe; p.standardError = pipe
         pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
             // The engine prints one plain line per event; the latest one is the status.
-            guard let line = String(data: h.availableData, encoding: .utf8)?.split(separator: "\n").last else { return }
+            guard let text = String(data: h.availableData, encoding: .utf8), let line = text.split(separator: "\n").last else { return }
+            let denied = text.contains("needs permission")
             let short = String(line).components(separatedBy: ". ").first!   // "Running. Bass in your…" -> "Running"
-            DispatchQueue.main.async { if self?.child === p { self?.status = short } }
+            DispatchQueue.main.async {
+                guard self?.child === p else { return }
+                if denied { self?.needsPermission = true } else if !(self?.needsPermission ?? false) { self?.status = short }
+            }
         }
         p.terminationHandler = { [weak self] p in
-            DispatchQueue.main.async { if self?.child === p { self?.child = nil; self?.status = "Stopped. " + (self?.status ?? "") } }
+            DispatchQueue.main.async {
+                guard let self, self.child === p else { return }
+                self.child = nil
+                self.status = self.needsPermission ? "macOS has not allowed this app to hear system sound" : "Stopped: " + self.status
+            }
         }
-        status = "Starting…"
+        status = "Starting…"; needsPermission = false
         do { try p.run(); child = p } catch { status = "Could not start: \(error.localizedDescription)" }
     }
 
@@ -60,6 +69,12 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         func header(_ title: String) { menu.addItem(.separator()); add(title) }   // an item without an action shows greyed out
 
         add(status)
+        if needsPermission {
+            add("Open Privacy Settings…") {
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+            }
+            add("Try Again") { [self] in restart() }
+        }
         add(on ? "Turn Off" : "Turn On") { [self] in on.toggle(); restart() }
 
         header("Feel sound from")
