@@ -43,6 +43,7 @@ There is nothing to look at. The app speaks plain text that works with VoiceOver
 | Softer or stronger vibration (default 0.7) | `~/dualsense-music --gain 0.4` or `--gain 1.2` |
 | See which apps can be chosen | `~/dualsense-music --list-apps` |
 | Check the controller works | `~/dualsense-music --test` |
+| Experimental: finer detail, sent as a waveform | `~/dualsense-music --raw` |
 | Stop | press **Control-C** |
 
 To keep it running after you close Terminal:
@@ -59,12 +60,17 @@ Stop it later with `pkill dualsense-music`.
 2. **Splitting.** The sound is split into a bass band (below about 120 Hz) and a voice/melody band (about 300 to 3000 Hz). Hi-hats and cymbals are left out so they don't blur the voice.
 3. **Feeling.** The sound is measured every 2 milliseconds. Each band reacts within 3 ms and fades within about 20 to 45 ms, so a drum hit feels like a hit and not a buzz. Whenever a band gets quieter than its recent average, the vibration stops, so pauses between words and spaces between notes are felt as stillness. Automatic gain keeps quiet songs and loud songs both full, and true silence stays still.
 4. **Texture.** Each band is split once more (bass around 60 Hz, voice around 1000 Hz). The more energy sits in the upper half, the crisper that grip feels.
-5. **Taps.** When a band jumps well above where it was 40 milliseconds earlier, a sharp click fires, at most about 11 per second. A held note taps once, then stays smooth.
-6. **Vibrating.** Apple's own **Core Haptics** (the framework Apple uses for the DualSense) drives a separate haptic engine for each grip: strength and sharpness updated 100 times a second, plus a transient click for every tap.
+5. **Taps.** When a band rises well above its quietest point of the last 50 milliseconds, a sharp click fires, at most about 11 per second. This catches a new piano key pressed while earlier notes still ring. The harder the note lands, the stronger the tap. A held note taps once, then stays smooth.
+6. **Vibrating.** Apple's own **Core Haptics** (the framework Apple uses for the DualSense) drives a separate haptic engine for each grip: strength and sharpness updated about 30 times a second (as fast as macOS passes them on), each update carrying the strongest moment since the last, plus a transient click for every tap.
 
 ## Notes
 
-- Wireless is the point, so everything runs over Bluetooth. Playing the raw audio waveform on the DualSense's actuators over Bluetooth (as [SAxense](https://github.com/egormanga/SAxense) does on Linux) is not possible on macOS: the system's HID driver owns the controller's data channel, and the route open to apps carries about 2.7 KB/s against the 6 KB/s the waveform needs. Core Haptics with live sharpness and taps is the richest wireless option on a Mac.
+- Wireless is the point, so everything runs over Bluetooth. The default mode uses Core Haptics with live sharpness and taps.
+- **Raw mode (`--raw`, experimental)** drives the DualSense's actuators with a waveform over Bluetooth, the way a PS5 does. The left hand gets the real bass wave (below about 150 Hz), so every bass note has its own pitch and every kick its own shape. The right hand gets a 200 Hz buzz whose strength follows the voice and melody 300 times a second. Skin cannot feel pitches above a few hundred hertz, so playing them directly would only make the controller sound like a small speaker. It builds on the packet format found by [SAxense](https://apps.sdore.me/SAxense). Two things make it work on a Mac:
+  - macOS sends the controller one small Bluetooth packet every 15 ms, or every 7.5 ms in Game Mode. Raw mode needs the faster rate, so it turns Game Mode on while it runs and back to automatic when it stops. This uses `gamepolicyctl`, which comes with Xcode.
+  - Each report carries 20.7 ms of sound in a double-length packet, so it fits in two Bluetooth packets.
+  
+  It was tested on one controller with firmware 0x0630; it also turns the light bar yellow. Core Haptics is off in raw mode.
 - Gaming apps that use the controller at the same time can override the vibration.
 - Build from source: `swift build -c release`, then run `.build/release/dualsense-music`. Run the tests with `swift test`.
 

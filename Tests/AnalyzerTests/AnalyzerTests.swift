@@ -63,4 +63,77 @@ final class AnalyzerTests: XCTestCase {
         let steady = run(Analyzer(), seconds: 2) { t in 0.3 * sinf(2 * .pi * 1000 * t) }
         XCTAssertEqual(steady.dropFirst(2).filter { $0.1.tap > 0 }.count, 0, "a held note taps only once")
     }
+
+    func testShortHitInsideABufferIsNotLost() {
+        // A 6 ms click at the start of a 20 ms buffer has faded by the buffer's end;
+        // it must still come out as a strong level, in order, when read in 8 ms steps.
+        let a = Analyzer()
+        _ = run(a, seconds: 1) { t in 0.02 * sinf(2 * .pi * 800 * t) }   // quiet bed
+        let n = Int(sr * 0.02)
+        let buf = (0..<n).map { i -> Float in (i < 288 ? 0.5 : 0.02) * sinf(2 * .pi * 800 * Float(i) / sr) }
+        buf.withUnsafeBufferPointer { a.process($0.baseAddress!, count: n, sampleRate: sr) }
+        XCTAssertGreaterThan(a.read(slices: 4).1.level, 0.8, "the click is felt at full strength")
+        let after = run(a, seconds: 0.08, from: 1.02) { t in 0.02 * sinf(2 * .pi * 800 * t) }.last!.1.level
+        XCTAssertLessThan(after, 0.25, "and is over again 80 ms later")
+    }
+
+    func testDropAfterQuietBuildUpStandsOut() {
+        // 10 s loud, 8 s at one tenth the level (build-up), then loud again (the drop).
+        let a = Analyzer()
+        let bass = { (amp: Float) in { (t: Float) in amp * sinf(2 * .pi * 50 * t) } }
+        _ = run(a, seconds: 10, bass(0.5))
+        let quiet = run(a, seconds: 8, from: 10, bass(0.05)).last!.0.level
+        let drop = run(a, seconds: 1, from: 18, bass(0.5)).map { $0.0.level }.max()!
+        XCTAssertGreaterThan(quiet, 0.05, "the build-up is still felt")
+        XCTAssertLessThan(quiet, 0.3, "but must not be turned up to full")
+        XCTAssertGreaterThan(drop, 0.9); XCTAssertGreaterThan(drop, quiet * 3)
+    }
+
+    func testNewNoteOverRingingNoteTaps() {
+        // Piano: a note is held, then a second key is pressed while the first still rings.
+        // The total only grows by about half, which an average-based test missed.
+        let lv = run(Analyzer(), seconds: 2) { t in
+            0.3 * sinf(2 * .pi * 600 * t) + (t >= 1 ? 0.2 * sinf(2 * .pi * 900 * t) : 0)
+        }
+        let taps = lv.enumerated().filter { $0.element.1.tap > 0 }.map { $0.offset }
+        XCTAssertEqual(taps.count, 2, "one tap per key press: \(taps)")
+        XCTAssertTrue((50...52).contains(taps.last!), "second tap lands on the second key press: \(taps)")
+        // The softer second press taps more softly than the first, which came out of silence.
+        XCTAssertLessThan(lv[taps[1]].1.tap, lv[taps[0]].1.tap)
+    }
+
+    func testFourNotesInASecondAreFourPulses() {
+        // Four overlapping notes, 250 ms apart, each ringing on under the next (like a piano with pedal).
+        let hz: [Float] = [440, 523, 659, 784]
+        let lv = run(Analyzer(), seconds: 2) { t in
+            guard t >= 1 else { return 0 }
+            return (0..<4).reduce(Float(0)) { s, k in
+                let since = t - 1 - 0.25 * Float(k)
+                return since < 0 ? s : s + 0.2 * expf(-since / 0.6) * sinf(2 * .pi * hz[k] * t)
+            }
+        }.dropFirst(50).map { $0.1.level }
+        // Around each note start the level must peak, and dip clearly before the next one.
+        for k in 1..<4 {
+            let i = Int(12.5 * Float(k))   // 20 ms buffers
+            let peak = lv[i...(i + 4)].max()!, before = lv[(i - 4)...(i - 1)].min()!
+            XCTAssertGreaterThan(peak, before * 1.5, "note \(k + 1) must stand out from the ringing before it")
+        }
+    }
+
+    func testHiHatOverMusicTapsCrisply() {
+        // A held 600 Hz note with 8 kHz ticks, 10 ms long, twice a second, on top.
+        let lv = run(Analyzer(), seconds: 4) { t in
+            0.2 * sinf(2 * .pi * 600 * t) + (t.truncatingRemainder(dividingBy: 0.5) < 0.01 ? 0.3 * sinf(2 * .pi * 8000 * t) : 0)
+        }.dropFirst(50)   // skip the note's own start
+        let taps = lv.filter { $0.1.tap > 0 }
+        XCTAssertEqual(taps.count, 6, "one light tap per tick")
+        XCTAssertTrue(taps.allSatisfy { $0.1.crisp && $0.1.tap < 0.6 }, "crisp and lighter than a note")
+        XCTAssertEqual(lv.filter { $0.0.tap > 0 }.count, 0, "nothing in the bass hand")
+    }
+
+    func testLoudestMomentsReachFullPower() {
+        XCTAssertEqual(Analyzer.strength(1, gain: 0.7), 1, accuracy: 0.001)       // a beat hits at full power
+        XCTAssertEqual(Analyzer.strength(0.5, gain: 0.7), 0.37, accuracy: 0.01)   // everyday level: about gain x level
+        XCTAssertEqual(Analyzer.strength(0, gain: 0.7), 0)
+    }
 }

@@ -15,6 +15,7 @@ struct Options {
     var gain: Float = 0.7        // overall strength multiplier
     var listApps = false
     var test = false
+    var raw = false              // experimental: raw waveform over Bluetooth instead of Core Haptics
 }
 
 func parseOptions() -> Options {
@@ -26,15 +27,18 @@ func parseOptions() -> Options {
         case "--gain", "-g": o.gain = Float(args.next() ?? "") ?? 0.7
         case "--list-apps": o.listApps = true
         case "--test": o.test = true
+        case "--raw": o.raw = true
         case "--help", "-h":
             print("""
             dualsense-music — feel sound through a DualSense controller.
 
-            Usage: dualsense-music [--app NAME] [--gain N] [--list-apps] [--test]
+            Usage: dualsense-music [--app NAME] [--gain N] [--list-apps] [--test] [--raw]
               --app NAME    only feel audio from one app (e.g. "Spotify", "Music", "Safari")
               --gain N      strength multiplier, default 0.7 (try 0.4 to 1.5)
               --list-apps   print apps that can be captured, then exit
               --test        play a short test vibration on both grips, then exit
+              --raw         experimental: finer detail, sent to the actuators as a waveform
+                            (Bluetooth only; turns macOS Game Mode on while running)
             Press Control-C to stop.
             """)
             exit(0)
@@ -125,6 +129,7 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
     let analyzer: Analyzer
     var stream: SCStream?
     private var mono = [Float]()
+    var wave: WaveformSink?
     init(analyzer: Analyzer) { self.analyzer = analyzer }
 
     func start(appName: String?) async throws {
@@ -176,6 +181,7 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
             mono.withUnsafeMutableBufferPointer { m in
                 for i in 0..<frames { m[i] *= scale }
                 analyzer.process(m.baseAddress!, count: frames, sampleRate: Float(fmt.mSampleRate))
+                wave?.feed(m.baseAddress!, count: frames, sampleRate: Float(fmt.mSampleRate))
             }
         }
     }
@@ -202,6 +208,11 @@ final class AudioTap: NSObject, SCStreamOutput, SCStreamDelegate {
 func run() async {
     GCController.shouldMonitorBackgroundEvents = true
 
+    // Two copies would both drive the controller and garble the vibration.
+    if !opts.listApps, flock(open(NSTemporaryDirectory() + "dualsense-music.lock", O_CREAT | O_RDWR, 0o600), LOCK_EX | LOCK_NB) != 0 {
+        print("dualsense-music is already running. Stop it first: pkill dualsense-music"); exit(1)
+    }
+
     if opts.listApps {
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
@@ -211,6 +222,8 @@ func run() async {
             exit(0)
         } catch { print(permissionHint(error)); exit(1) }
     }
+
+    if opts.raw { await runRaw(); return }
 
     // Give GameController a moment to enumerate already-paired controllers.
     try? await Task.sleep(nanoseconds: 500_000_000)
@@ -238,13 +251,15 @@ func run() async {
     }
     print("Running. Bass in your left hand, voice and melody in your right; bright sounds feel crisp, new notes tap. Control-C to stop.")
 
-    // ~100 updates per second: fast enough for drum hits, light on Bluetooth.
+    // macOS forwards Core Haptics changes to the controller only ~30 times a second (measured),
+    // whatever rate we send at. So send at that rate, each update carrying the strongest moment
+    // of its 32 ms: sending faster only made the system skip the moments in between.
     let timer = DispatchSource.makeTimerSource(queue: .main)
-    timer.schedule(deadline: .now(), repeating: .milliseconds(10))
+    timer.schedule(deadline: .now(), repeating: .milliseconds(32))
     var last = (Grip(level: -1), Grip(level: -1))
     func drive(_ g: Grip, _ prev: inout Grip, _ grip: GripHaptics) {
-        let level = min(g.level * opts.gain, 1)
-        if g.tap > 0 { grip.tap(min(g.tap * opts.gain * 1.2, 1), sharpness: g.sharpness) }
+        let level = Analyzer.strength(g.level, gain: opts.gain)
+        if g.tap > 0 { grip.tap(Analyzer.strength(g.tap, gain: min(opts.gain * 1.2, 1)), sharpness: g.crisp ? 1 : g.sharpness) }
         // Send only meaningful changes, and always the drop to zero, to keep Bluetooth light.
         if abs(level - prev.level) > 0.01 || abs(g.sharpness - prev.sharpness) > 0.03 || (level == 0 && prev.level != 0) {
             grip.set(level, sharpness: g.sharpness)
@@ -252,7 +267,7 @@ func run() async {
         }
     }
     timer.setEventHandler {
-        let (lo, hi) = analyzer.read()
+        let (lo, hi) = analyzer.read(slices: 16)
         drive(lo, &last.0, left); drive(hi, &last.1, right)
     }
     timer.resume()
@@ -261,6 +276,30 @@ func run() async {
     for sig in [SIGINT, SIGTERM] {
         let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
         src.setEventHandler { timer.cancel(); left.stop(); right.stop(); print("\nStopped."); exit(0) }
+        src.resume()
+        signalSources.append(src)
+    }
+}
+
+/// Raw mode: no Core Haptics (its reports would switch the actuators back to rumble emulation).
+@MainActor
+func runRaw() async {
+    guard let sink = WaveformSink(gain: opts.gain) else {
+        print("--raw needs a DualSense connected by Bluetooth."); exit(1)
+    }
+    if !setGameMode(true) {
+        print("Could not turn on Game Mode (needs Xcode's gamepolicyctl). Without it the Bluetooth link is too slow and the vibration will stutter.")
+    }
+    let tap = AudioTap(analyzer: Analyzer()); tap.wave = sink; activeTap = tap
+    do { try await tap.start(appName: opts.app) } catch {
+        print(permissionHint(error)); setGameMode(false); exit(1)
+    }
+    sink.start()
+    print("Running in raw mode: the real bass wave in your left hand, voice and melody as a buzz in your right. Control-C to stop.")
+    signal(SIGINT, SIG_IGN); signal(SIGTERM, SIG_IGN)
+    for sig in [SIGINT, SIGTERM] {
+        let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+        src.setEventHandler { setGameMode(false); print("\nStopped."); exit(0) }
         src.resume()
         signalSources.append(src)
     }
