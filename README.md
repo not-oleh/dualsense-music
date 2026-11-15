@@ -36,13 +36,15 @@ There is nothing to look at. The app speaks plain text that works with VoiceOver
 
 ## Menu bar app
 
-If you prefer not to use Terminal after the first build, there is a menu bar app. It needs the source code and Xcode's command line tools:
+If you prefer not to use Terminal every time, there is a menu bar app. Install it by pasting this into Terminal once:
 
 ```bash
-./make-app.sh
+curl -L https://github.com/not-oleh/dualsense-music/releases/latest/download/DualSense-Music-app.zip -o /tmp/dsm-app.zip && unzip -o /tmp/dsm-app.zip -d /Applications && open "/Applications/DualSense Music.app"
 ```
 
-This creates **DualSense Music.app** in the project folder. Open it (or move it to Applications first). A game controller icon appears in the menu bar. Its menu lets you:
+To build it from source instead, run `./make-app.sh` (needs Xcode's command line tools). This creates **DualSense Music.app** in the project folder.
+
+When the app is open, a game controller icon appears in the menu bar. Its menu lets you:
 
 - turn the vibration on or off,
 - choose which app to feel: everything, or one running app such as Spotify or Music,
