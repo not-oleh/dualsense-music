@@ -55,7 +55,7 @@ final class GripHaptics {
     let engine: CHHapticEngine
     private var player: CHHapticPatternPlayer?
     private var startedAt = Date.distantPast
-    private var level: Float = 0
+    private var level: Float = 0, sharpness: Float = 0.5
     private static let span: TimeInterval = 30
 
     private init(engine: CHHapticEngine) { self.engine = engine }
@@ -79,22 +79,38 @@ final class GripHaptics {
         return g
     }
 
-    /// Set vibration strength 0...1. Call from the main queue.
-    func set(_ v: Float) {
-        level = v
+    /// Set vibration strength and sharpness, 0...1 each. Call from the main queue.
+    func set(_ v: Float, sharpness: Float = 0.5) {
+        level = v; self.sharpness = sharpness
         if player == nil || Date().timeIntervalSince(startedAt) > GripHaptics.span - 2 { renew() }
-        try? player?.sendParameters([CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: v, relativeTime: 0)], atTime: CHHapticTimeImmediate)
+        try? player?.sendParameters(controls, atTime: CHHapticTimeImmediate)
+    }
+
+    /// A single sharp click on top of the vibration, for a new hit, note or syllable.
+    func tap(_ intensity: Float, sharpness: Float) {
+        let event = CHHapticEvent(eventType: .hapticTransient, parameters: [
+            CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity),
+            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.4 + 0.6 * sharpness),
+        ], relativeTime: 0)
+        guard let pattern = try? CHHapticPattern(events: [event], parameters: []) else { return }
+        try? engine.makePlayer(with: pattern).start(atTime: CHHapticTimeImmediate)
+    }
+
+    // The continuous event's sharpness is 0, so the sharpness control (an offset) is the value itself.
+    private var controls: [CHHapticDynamicParameter] {
+        [CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: level, relativeTime: 0),
+         CHHapticDynamicParameter(parameterID: .hapticSharpnessControl, value: sharpness, relativeTime: 0)]
     }
 
     /// Start a fresh full-intensity continuous event and drop the old one.
     private func renew() {
         let event = CHHapticEvent(eventType: .hapticContinuous, parameters: [
             CHHapticEventParameter(parameterID: .hapticIntensity, value: 1),
-            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5),
+            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0),
         ], relativeTime: 0, duration: GripHaptics.span)
         guard let pattern = try? CHHapticPattern(events: [event], parameters: []),
               let next = try? engine.makePlayer(with: pattern) else { return }
-        try? next.sendParameters([CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: level, relativeTime: 0)], atTime: CHHapticTimeImmediate)
+        try? next.sendParameters(controls, atTime: CHHapticTimeImmediate)
         try? next.start(atTime: CHHapticTimeImmediate)
         try? player?.stop(atTime: CHHapticTimeImmediate)
         player = next; startedAt = Date()
@@ -220,18 +236,24 @@ func run() async {
     do { try await tap.start(appName: opts.app) } catch {
         print(permissionHint(error)); left.stop(); right.stop(); exit(1)
     }
-    print("Running. Feel the bass in your left hand, melody and beats in your right. Control-C to stop.")
+    print("Running. Bass in your left hand, voice and melody in your right; bright sounds feel crisp, new notes tap. Control-C to stop.")
 
     // ~100 updates per second: fast enough for drum hits, light on Bluetooth.
     let timer = DispatchSource.makeTimerSource(queue: .main)
     timer.schedule(deadline: .now(), repeating: .milliseconds(10))
-    var last: (Float, Float) = (-1, -1)
+    var last = (Grip(level: -1), Grip(level: -1))
+    func drive(_ g: Grip, _ prev: inout Grip, _ grip: GripHaptics) {
+        let level = min(g.level * opts.gain, 1)
+        if g.tap > 0 { grip.tap(min(g.tap * opts.gain * 1.2, 1), sharpness: g.sharpness) }
+        // Send only meaningful changes, and always the drop to zero, to keep Bluetooth light.
+        if abs(level - prev.level) > 0.01 || abs(g.sharpness - prev.sharpness) > 0.03 || (level == 0 && prev.level != 0) {
+            grip.set(level, sharpness: g.sharpness)
+            prev = Grip(level: level, sharpness: g.sharpness)
+        }
+    }
     timer.setEventHandler {
-        let (lo, hi) = analyzer.levels
-        let l = min(lo * opts.gain, 1), r = min(hi * opts.gain, 1)
-        if abs(l - last.0) > 0.01 || (l == 0 && last.0 != 0) { left.set(l) }
-        if abs(r - last.1) > 0.01 || (r == 0 && last.1 != 0) { right.set(r) }
-        last = (l, r)
+        let (lo, hi) = analyzer.read()
+        drive(lo, &last.0, left); drive(hi, &last.1, right)
     }
     timer.resume()
 

@@ -4,8 +4,9 @@
 
 It was made for people who are blind, Deaf, hard of hearing or deafblind, and for anyone who wants to *feel* a song, not only hear it. Hold the controller and the music moves through your hands:
 
-- **Left hand — the bass.** Kick drums, bass lines, the low rumble of a film score.
-- **Right hand — the voice and the melody.** Singing, guitars, keys. Every new syllable or note is a pulse, and the pause between words or lines goes still.
+- **Left hand — the bass.** Kick drums, bass lines, the low rumble of a film score. A kick feels crisp and punchy, a deep sub-bass feels round.
+- **Right hand — the voice and the melody.** Singing, guitars, keys. A bright, high voice feels crisp; a low, warm one feels dull. The pause between words or lines goes still.
+- **Taps.** Every new drum hit, note or syllable is a short, sharp click in the hand it belongs to, so you can count the rhythm and follow the words.
 
 There is nothing to look at. The app speaks plain text that works with VoiceOver, and the controller plays a short **left, right, both** pulse when it is ready. The pulse tells you everything is working without needing a screen.
 
@@ -23,7 +24,7 @@ There is nothing to look at. The app speaks plain text that works with VoiceOver
    curl -L https://github.com/not-oleh/dualsense-music/releases/latest/download/dualsense-music.zip -o /tmp/dsm.zip && unzip -o /tmp/dsm.zip -d ~ && chmod +x ~/dualsense-music
    ```
 
-   This puts the program in your home folder.
+   This puts the program in your home folder. To update later, paste the same command again.
 
 3. Run it once:
 
@@ -57,11 +58,13 @@ Stop it later with `pkill dualsense-music`.
 1. **Listening.** Apple's ScreenCaptureKit gives the program a live copy of the sound your Mac plays, for the whole system or for one app. Your speakers keep working as normal.
 2. **Splitting.** The sound is split into a bass band (below about 120 Hz) and a voice/melody band (about 300 to 3000 Hz). Hi-hats and cymbals are left out so they don't blur the voice.
 3. **Feeling.** The sound is measured every 2 milliseconds. Each band reacts within 3 ms and fades within about 20 to 45 ms, so a drum hit feels like a hit and not a buzz. Whenever a band gets quieter than its recent average, the vibration stops, so pauses between words and spaces between notes are felt as stillness. Automatic gain keeps quiet songs and loud songs both full, and true silence stays still.
-4. **Vibrating.** Apple's own **Core Haptics** (the framework Apple uses for the DualSense) drives a separate haptic engine for each grip, updated 100 times a second.
+4. **Texture.** Each band is split once more (bass around 60 Hz, voice around 1000 Hz). The more energy sits in the upper half, the crisper that grip feels.
+5. **Taps.** When a band jumps well above where it was 40 milliseconds earlier, a sharp click fires, at most about 11 per second. A held note taps once, then stays smooth.
+6. **Vibrating.** Apple's own **Core Haptics** (the framework Apple uses for the DualSense) drives a separate haptic engine for each grip: strength and sharpness updated 100 times a second, plus a transient click for every tap.
 
 ## Notes
 
-- Over Bluetooth, macOS drives the DualSense's rumble motors. That is strong and expressive, but the controller's fine "HD haptics" are only reachable as a USB audio device, which this version does not use yet.
+- Wireless is the point, so everything runs over Bluetooth. Playing the raw audio waveform on the DualSense's actuators over Bluetooth (as [SAxense](https://github.com/egormanga/SAxense) does on Linux) is not possible on macOS: the system's HID driver owns the controller's data channel, and the route open to apps carries about 2.7 KB/s against the 6 KB/s the waveform needs. Core Haptics with live sharpness and taps is the richest wireless option on a Mac.
 - Gaming apps that use the controller at the same time can override the vibration.
 - Build from source: `swift build -c release`, then run `.build/release/dualsense-music`. Run the tests with `swift test`.
 
