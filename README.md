@@ -34,6 +34,24 @@ There is nothing to look at. The app speaks plain text that works with VoiceOver
 
    The first time, macOS asks to let Terminal record the screen and system audio. The program listens only to sound; it never records or saves anything. Allow it in **System Settings → Privacy & Security → Screen & System Audio Recording**, turn on **Terminal**, quit Terminal and open it again, then run the command again.
 
+## Menu bar app
+
+If you prefer not to use Terminal after the first build, there is a menu bar app. It needs the source code and Xcode's command line tools:
+
+```bash
+./make-app.sh
+```
+
+This creates **DualSense Music.app** in the project folder. Open it (or move it to Applications first). A game controller icon appears in the menu bar. Its menu lets you:
+
+- turn the vibration on or off,
+- choose which app to feel: everything, or one running app such as Spotify or Music,
+- choose the strength: soft, normal or strong,
+- switch between the standard mode and the experimental raw waveform mode,
+- quit.
+
+Your choices are remembered. The first time, macOS asks to let *DualSense Music* record system audio; allow it and open the app again. The menu is plain text and works with VoiceOver.
+
 ## Use
 
 | What you want | Type |

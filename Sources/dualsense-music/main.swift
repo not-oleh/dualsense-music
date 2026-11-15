@@ -15,6 +15,7 @@ struct Options {
     var gain: Float = 0.7        // overall strength multiplier
     var listApps = false
     var test = false
+    var menu = false             // run as a menu bar app instead of in the terminal
     var raw = false              // experimental: raw waveform over Bluetooth instead of Core Haptics
 }
 
@@ -28,15 +29,17 @@ func parseOptions() -> Options {
         case "--list-apps": o.listApps = true
         case "--test": o.test = true
         case "--raw": o.raw = true
+        case "--menu": o.menu = true
         case "--help", "-h":
             print("""
             dualsense-music — feel sound through a DualSense controller.
 
-            Usage: dualsense-music [--app NAME] [--gain N] [--list-apps] [--test] [--raw]
+            Usage: dualsense-music [--app NAME] [--gain N] [--list-apps] [--test] [--raw] [--menu]
               --app NAME    only feel audio from one app (e.g. "Spotify", "Music", "Safari")
               --gain N      strength multiplier, default 0.7 (try 0.4 to 1.5)
               --list-apps   print apps that can be captured, then exit
               --test        play a short test vibration on both grips, then exit
+              --menu        show a menu bar icon to pick the app, strength and mode
               --raw         experimental: finer detail, sent to the actuators as a waveform
                             (Bluetooth only; turns macOS Game Mode on while running)
             Press Control-C to stop.
@@ -46,6 +49,8 @@ func parseOptions() -> Options {
             print("Unknown option \(a). Use --help."); exit(2)
         }
     }
+    // Opened as an app (double-click), with nothing asked on the command line: be the menu bar app.
+    if CommandLine.arguments.count == 1, Bundle.main.bundlePath.hasSuffix(".app") { o.menu = true }
     return o
 }
 
@@ -318,5 +323,4 @@ func permissionHint(_ error: Error) -> String {
 // Kept alive for the whole run; SCStream does not retain its output.
 nonisolated(unsafe) var signalSources: [DispatchSourceSignal] = []
 nonisolated(unsafe) var activeTap: AudioTap?
-Task { await run() }
-dispatchMain()
+if opts.menu { MenuBarApp.main() } else { Task { await run() }; dispatchMain() }
