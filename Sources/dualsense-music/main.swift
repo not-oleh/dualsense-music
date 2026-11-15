@@ -12,7 +12,7 @@ setvbuf(stdout, nil, _IOLBF, 0)
 
 struct Options {
     var app: String? = nil       // capture only this app (name or bundle id substring)
-    var gain: Float = 1.0        // overall strength multiplier
+    var gain: Float = 0.7        // overall strength multiplier
     var listApps = false
     var test = false
 }
@@ -23,7 +23,7 @@ func parseOptions() -> Options {
     while let a = args.next() {
         switch a {
         case "--app", "-a": o.app = args.next()
-        case "--gain", "-g": o.gain = Float(args.next() ?? "") ?? 1.0
+        case "--gain", "-g": o.gain = Float(args.next() ?? "") ?? 0.7
         case "--list-apps": o.listApps = true
         case "--test": o.test = true
         case "--help", "-h":
@@ -32,7 +32,7 @@ func parseOptions() -> Options {
 
             Usage: dualsense-music [--app NAME] [--gain N] [--list-apps] [--test]
               --app NAME    only feel audio from one app (e.g. "Spotify", "Music", "Safari")
-              --gain N      strength multiplier, default 1.0 (try 0.5 to 2.0)
+              --gain N      strength multiplier, default 0.7 (try 0.4 to 1.5)
               --list-apps   print apps that can be captured, then exit
               --test        play a short test vibration on both grips, then exit
             Press Control-C to stop.
@@ -46,71 +46,6 @@ func parseOptions() -> Options {
 }
 
 let opts = parseOptions()
-
-// MARK: - DSP: split audio into a bass band (left grip) and a mid/high band (right grip)
-
-/// Converts raw samples into two 0...1 vibration levels. Thread-confined to the audio queue,
-/// except `levels`, which is read by the haptics timer under a lock.
-final class Analyzer {
-    private let lock = NSLock()
-    private var _low: Float = 0, _high: Float = 0
-    var levels: (Float, Float) { lock.lock(); defer { lock.unlock() }; return (_low, _high) }
-
-    private var lp1: Float = 0, lp2: Float = 0     // two-pole low-pass for bass (~140 Hz)
-    private var hpPrev: Float = 0, hpIn: Float = 0 // high-pass for mids (~250 Hz)
-    private var envLow: Float = 0, envHigh: Float = 0, envHighSlow: Float = 0
-    private var peakLow: Float = 1e-4, peakHigh: Float = 1e-4
-
-    func process(_ samples: UnsafePointer<Float>, count: Int, sampleRate: Float) {
-        guard count > 0 else { return }
-        let aLow = 1 - expf(-2 * Float.pi * 140 / sampleRate)
-        let rcHp = 1 / (2 * Float.pi * 250), dt = 1 / sampleRate
-        let aHp = rcHp / (rcHp + dt)
-        var sumLow: Float = 0, sumHigh: Float = 0
-        for i in 0..<count {
-            let x = samples[i]
-            lp1 += aLow * (x - lp1); lp2 += aLow * (lp1 - lp2)
-            let hp = aHp * (hpPrev + x - hpIn); hpIn = x; hpPrev = hp
-            sumLow += lp2 * lp2; sumHigh += hp * hp
-        }
-        let rmsLow = sqrtf(sumLow / Float(count)), rmsHigh = sqrtf(sumHigh / Float(count))
-        let blockSec = Float(count) / sampleRate
-
-        // Envelope followers: fast attack, slower release, so beats feel punchy but not buzzy.
-        func follow(_ env: inout Float, _ v: Float, attack: Float, release: Float) {
-            let t = v > env ? attack : release
-            env += (v - env) * (1 - expf(-blockSec / t))
-        }
-        follow(&envLow, rmsLow, attack: 0.005, release: 0.09)
-        follow(&envHigh, rmsHigh, attack: 0.003, release: 0.06)
-        follow(&envHighSlow, rmsHigh, attack: 0.25, release: 0.25)
-
-        // Auto-gain: track a slowly decaying peak so quiet and loud songs both feel full.
-        let decay = expf(-blockSec / 6)
-        peakLow = max(envLow, peakLow * decay, 1e-4)
-        peakHigh = max(envHigh, peakHigh * decay, 1e-4)
-
-        // Right grip: steady mids at reduced weight plus transients (drums, plucks) at full.
-        let onset = max(0, envHigh - envHighSlow) * 2.5
-        let low = Analyzer.shape(envLow, peak: peakLow)
-        let high = Analyzer.shape(0.45 * envHigh + onset, peak: peakHigh)
-        lock.lock(); _low = low; _high = high; lock.unlock()
-    }
-
-    /// Map an envelope to 0...1 on a 30 dB window below the running peak, with a silence gate.
-    static func shape(_ env: Float, peak: Float) -> Float {
-        let db = 20 * log10f(max(env, 1e-7))
-        if db < -60 { return 0 } // true silence: stay still
-        let rel = db - 20 * log10f(peak)
-        let x = min(max(1 + rel / 30, 0), 1)
-        return x * x // perceptual curve: quiet parts gentle, peaks strong
-    }
-}
-
-// Self-check of the mapping (runs on every launch, costs nothing).
-assert(Analyzer.shape(0, peak: 1) == 0, "silence must not vibrate")
-assert(Analyzer.shape(1, peak: 1) == 1, "peak must be full strength")
-assert(Analyzer.shape(0.1, peak: 1) < Analyzer.shape(0.5, peak: 1), "louder must be stronger")
 
 // MARK: - Haptics: one Core Haptics engine per grip
 

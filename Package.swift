@@ -4,5 +4,8 @@ import PackageDescription
 let package = Package(
     name: "dualsense-music",
     platforms: [.macOS(.v13)],
-    targets: [.executableTarget(name: "dualsense-music")]
+    targets: [
+        .executableTarget(name: "dualsense-music"),
+        .testTarget(name: "AnalyzerTests", dependencies: ["dualsense-music"]),
+    ]
 )
