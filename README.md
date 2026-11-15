@@ -2,13 +2,13 @@
 
 **DualSense Music turns the sound playing on your Mac into vibrations on a PlayStation 5 DualSense controller, so you can feel music through touch.**
 
-It was made for people who are blind, Deaf, hard of hearing or deafblind, and for anyone who wants to *feel* a song, not only hear it. Hold the controller and the music moves through your hands:
+It was made for people who are Deaf, hard of hearing or deafblind, and for anyone who wants to *feel* a song, not only hear it. Hold the controller and the music moves through your hands:
 
 - **Left hand — the bass.** Kick drums, bass lines, the low rumble of a film score. A kick feels crisp and punchy, a deep sub-bass feels round.
 - **Right hand — the voice and the melody.** Singing, guitars, keys. A bright, high voice feels crisp; a low, warm one feels dull. The pause between words or lines goes still.
 - **Taps.** Every new drum hit, note or syllable is a short, sharp click in the hand it belongs to, so you can count the rhythm and follow the words.
 
-There is nothing to look at. The app speaks plain text that works with VoiceOver, and the controller plays a short **left, right, both** pulse when it is ready. The pulse tells you everything is working without needing a screen.
+There is nothing to look at, so it works for blind and deafblind users too. The app speaks plain text that works with VoiceOver, and the controller plays a short **left, right, both** pulse when it is ready. The pulse tells you everything is working without needing a screen.
 
 ## What you need
 
