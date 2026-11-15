@@ -16,6 +16,7 @@ struct Options {
     var listApps = false
     var test = false
     var menu = false             // run as a menu bar app instead of in the terminal
+    var instrumental = false     // solo instruments: every note a sharp spike
     var raw = false              // experimental: raw waveform over Bluetooth instead of Core Haptics
 }
 
@@ -29,17 +30,19 @@ func parseOptions() -> Options {
         case "--list-apps": o.listApps = true
         case "--test": o.test = true
         case "--raw": o.raw = true
+        case "--instrumental": o.instrumental = true
         case "--menu": o.menu = true
         case "--help", "-h":
             print("""
             dualsense-music — feel sound through a DualSense controller.
 
-            Usage: dualsense-music [--app NAME] [--gain N] [--list-apps] [--test] [--raw] [--menu]
+            Usage: dualsense-music [--app NAME] [--gain N] [--list-apps] [--test] [--instrumental] [--raw] [--menu]
               --app NAME    only feel audio from one app (e.g. "Spotify", "Music", "Safari")
               --gain N      strength multiplier, default 0.7 (try 0.4 to 1.5)
               --list-apps   print apps that can be captured, then exit
               --test        play a short test vibration on both grips, then exit
               --menu        show a menu bar icon to pick the app, strength and mode
+              --instrumental  for solo piano and the like: every key press is a sharp spike
               --raw         experimental: finer detail, sent to the actuators as a waveform
                             (Bluetooth only; turns macOS Game Mode on while running)
             Press Control-C to stop.
@@ -249,12 +252,14 @@ func run() async {
     }
     if opts.test { left.stop(); right.stop(); print("Test done."); exit(0) }
 
-    let analyzer = Analyzer()
+    let analyzer = Analyzer(instrumental: opts.instrumental)
     let tap = AudioTap(analyzer: analyzer); activeTap = tap
     do { try await tap.start(appName: opts.app) } catch {
         print(permissionHint(error)); left.stop(); right.stop(); exit(1)
     }
-    print("Running. Bass in your left hand, voice and melody in your right; bright sounds feel crisp, new notes tap. Control-C to stop.")
+    print(opts.instrumental
+          ? "Running. Instrumental mode: low notes in your left hand, high notes in your right, every note a sharp hit. Control-C to stop."
+          : "Running. Bass in your left hand, voice and melody in your right; bright sounds feel crisp, new notes tap. Control-C to stop.")
 
     // macOS forwards Core Haptics changes to the controller only ~30 times a second (measured),
     // whatever rate we send at. So send at that rate, each update carrying the strongest moment

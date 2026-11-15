@@ -47,7 +47,7 @@ This creates **DualSense Music.app** in the project folder. Open it (or move it 
 - turn the vibration on or off,
 - choose which app to feel: everything, or one running app such as Spotify or Music,
 - choose the strength: soft, normal or strong,
-- switch between the standard mode and the experimental raw waveform mode,
+- choose the mode: standard, instrumental (for solo piano and similar), or the experimental raw waveform,
 - quit.
 
 Your choices are remembered. The first time, macOS asks to let *DualSense Music* record system audio; allow it and open the app again. The menu is plain text and works with VoiceOver.
@@ -61,6 +61,7 @@ Your choices are remembered. The first time, macOS asks to let *DualSense Music*
 | Softer or stronger vibration (default 0.7) | `~/dualsense-music --gain 0.4` or `--gain 1.2` |
 | See which apps can be chosen | `~/dualsense-music --list-apps` |
 | Check the controller works | `~/dualsense-music --test` |
+| Solo piano or another solo instrument: every note a sharp hit | `~/dualsense-music --instrumental` |
 | Experimental: finer detail, sent as a waveform | `~/dualsense-music --raw` |
 | Stop | press **Control-C** |
 
@@ -80,6 +81,10 @@ Stop it later with `pkill dualsense-music`.
 4. **Texture.** Each band is split once more (bass around 60 Hz, voice around 1000 Hz). The more energy sits in the upper half, the crisper that grip feels.
 5. **Taps.** When a band rises well above its quietest point of the last 50 milliseconds, a sharp click fires, at most about 11 per second. This catches a new piano key pressed while earlier notes still ring. The harder the note lands, the stronger the tap. A held note taps once, then stays smooth.
 6. **Vibrating.** Apple's own **Core Haptics** (the framework Apple uses for the DualSense) drives a separate haptic engine for each grip: strength and sharpness updated about 30 times a second (as fast as macOS passes them on), each update carrying the strongest moment since the last, plus a transient click for every tap.
+
+## Instrumental mode
+
+Standard mode is made for songs: a held note keeps vibrating, so a fast run of piano notes can blur into one rumble. Instrumental mode (`--instrumental`, or *Instrumental* in the menu) is for a solo instrument with little or nothing behind it. Every key press is a spike: full strength for 40 milliseconds, then straight down to almost nothing until the next note. Low notes (below about 300 Hz) go to the left hand, high notes to the right, and chords to both. On songs with drums and vocals it will feel choppy; use standard mode for those.
 
 ## Notes
 

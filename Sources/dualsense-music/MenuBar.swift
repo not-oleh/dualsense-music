@@ -13,7 +13,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var on: Bool { get { saved.object(forKey: "on") as? Bool ?? true } set { saved.set(newValue, forKey: "on") } }
     private var source: String? { get { saved.string(forKey: "source") } set { saved.set(newValue, forKey: "source") } }
     private var gain: Float { get { saved.object(forKey: "gain") as? Float ?? 0.7 } set { saved.set(newValue, forKey: "gain") } }
-    private var raw: Bool { get { saved.bool(forKey: "raw") } set { saved.set(newValue, forKey: "raw") } }
+    private var mode: String { get { saved.string(forKey: "mode") ?? "standard" } set { saved.set(newValue, forKey: "mode") } }
 
     func applicationDidFinishLaunching(_ note: Notification) {
         item.button?.image = NSImage(systemSymbolName: "gamecontroller.fill", accessibilityDescription: "DualSense Music")
@@ -35,7 +35,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard on else { status = "Off"; return }
         let p = Process(), pipe = Pipe()
         p.executableURL = Bundle.main.executableURL
-        p.arguments = (source.map { ["--app", $0] } ?? []) + ["--gain", "\(gain)"] + (raw ? ["--raw"] : [])
+        p.arguments = (source.map { ["--app", $0] } ?? []) + ["--gain", "\(gain)"] + (mode == "standard" ? [] : ["--" + mode])
         p.standardOutput = pipe; p.standardError = pipe
         pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
             // The engine prints one plain line per event; the latest one is the status.
@@ -92,8 +92,9 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         header("Mode")
-        add("Standard", checked: !raw) { [self] in raw = false; restart() }
-        add("Raw waveform (experimental)", checked: raw) { [self] in raw = true; restart() }
+        for (name, value) in [("Standard", "standard"), ("Instrumental (piano, solo instruments)", "instrumental"), ("Raw waveform (experimental)", "raw")] {
+            add(name, checked: mode == value) { [self] in mode = value; restart() }
+        }
 
         menu.addItem(.separator())
         add("Quit DualSense Music") { NSApp.terminate(nil) }

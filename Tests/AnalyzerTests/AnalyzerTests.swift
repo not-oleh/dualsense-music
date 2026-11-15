@@ -136,4 +136,23 @@ final class AnalyzerTests: XCTestCase {
         XCTAssertEqual(Analyzer.strength(0.5, gain: 0.7), 0.37, accuracy: 0.01)   // everyday level: about gain x level
         XCTAssertEqual(Analyzer.strength(0, gain: 0.7), 0)
     }
+
+    func testInstrumentalModeMakesEveryNoteASpike() {
+        // The same four ringing notes, 250 ms apart: each must spike to near full and fall
+        // back to almost nothing before the next, in both hands' ranges.
+        for (hz, hand) in [([440, 523, 659, 784], 1), ([110, 131, 165, 196], 0)] as [([Float], Int)] {
+            let lv = run(Analyzer(instrumental: true), seconds: 2) { t in
+                guard t >= 1 else { return 0 }
+                return (0..<4).reduce(Float(0)) { s, k in
+                    let since = t - 1 - 0.25 * Float(k)
+                    return since < 0 ? s : s + 0.2 * expf(-since / 0.6) * sinf(2 * .pi * hz[k] * t)
+                }
+            }.dropFirst(50).map { hand == 0 ? $0.0 : $0.1 }
+            XCTAssertEqual(lv.filter { $0.tap > 0 }.count, 4, "one tap per key press")
+            for k in 0..<4 {
+                let i = Int(12.5 * Float(k)), spike = lv[i...(i + 3)].map(\.level).max()!, after = lv[(i + 7)...(i + 10)].map(\.level).max()!
+                XCTAssertGreaterThan(spike, 0.5, "note \(k + 1) spikes"); XCTAssertLessThan(after, spike * 0.25, "and drops sharply")
+            }
+        }
+    }
 }

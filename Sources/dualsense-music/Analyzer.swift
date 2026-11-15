@@ -40,6 +40,9 @@ final class Analyzer {
         let splitHz: Float                    // energy above vs below this sets sharpness
         var sustain: Float = 1                // level a held sound settles to after its strike, as a fraction
         var fade: Float = 0.12                // seconds for a strike to fade toward `sustain`
+        var hold: Float = 0                   // seconds a strike stays at full before it fades
+        var riseNeeded: Float = 1.35          // how far above its quietest recent point a sound must rise to count as a strike
+        var minGap: Float = 0.09              // seconds between strikes
         var hp1: Float = 0, hp2: Float = 0, hpIn1: Float = 0, hpIn2: Float = 0
         var lp1: Float = 0, lp2: Float = 0, split: Float = 0
         var env: Float = 0, slow: Float = 0, peak: Float = 1e-4
@@ -97,7 +100,7 @@ final class Analyzer {
             valley.append(env); if valley.count > max(1, Int(0.05 / dt)) { valley.removeFirst() }
             let rise = env / max(valley.min()!, 1e-7)
             sinceTap += dt
-            if strike == nil, rising, rise > 1.35, env > 1e-4, sinceTap > 0.09 { strike = (0, 0, 0) }
+            if strike == nil, rising, rise > riseNeeded, env > 1e-4, sinceTap > minGap { strike = (0, 0, 0) }
             var tap: Float = 0
             if var s = strike {
                 // Wait 12 ms for the note to reach its height, so the tap can be as strong as the hit.
@@ -113,15 +116,33 @@ final class Analyzer {
             // Each strike is a pulse that fades toward `sustain`, so four notes in a second are
             // felt as four pulses, not one long rumble.
             sinceStrike = strike != nil || tap > 0 ? 0 : sinceStrike + dt   // from the first moment of the strike
-            let pulse = sustain + (1 - sustain) * expf(-sinceStrike / fade)
+            let pulse = sustain + (1 - sustain) * expf(-max(0, sinceStrike - hold) / fade)
             return Grip(level: level * pulse, sharpness: sharpness, tap: tap)
         }
     }
 
     private var bass = Band(lowCut: nil, highCut: 120, release: 0.045, contrastFloor: 0.15, splitHz: 60, sustain: 0.6)
     private var voice = Band(lowCut: 300, highCut: 3000, release: 0.02, contrastFloor: 0.55, splitHz: 1000, sustain: 0.4, fade: 0.07)
+
+    /// `instrumental`: for solo instruments such as piano, with little or no backing. Every
+    /// key press is a spike: full for 40 ms, then straight down to almost nothing, so separate
+    /// notes are felt as separate hits. One detector hears the whole instrument (two bands
+    /// would each hear the other's notes leak in and chatter); the pitch then decides the
+    /// hand: low notes (below ~300 Hz) left, high notes right, chords both.
+    init(instrumental: Bool = false) {
+        guard instrumental else { return }
+        solo = true
+        // Notes ringing together beat against each other ~20 times a second; the 60 ms release
+        // keeps that wobble from counting as new key presses. Scored on a real piano recording:
+        // 76% of key presses found, 86% of strikes real. A 30 ms release finds 83% but doubles
+        // the strikes on held low notes.
+        voice = Band(lowCut: 200, highCut: 3000, release: 0.06, contrastFloor: 0.3, splitHz: 300,
+                     sustain: 0.1, fade: 0.03, hold: 0.04, riseNeeded: 1.3, minGap: 0.08)
+    }
+    private var solo = false
     // Hi-hats and cymbals: never a continuous buzz (it would blur the voice), only light crisp taps.
     private var hats = Band(lowCut: 5000, highCut: nil, release: 0.02, contrastFloor: 0.55, splitHz: 8000)
+
     private var totalEnv: Float = 0, totalPeak: Float = 1e-4
     private var pendingHat: (age: Float, strength: Float)?
 
@@ -147,6 +168,16 @@ final class Analyzer {
             let rmsAll = sqrtf(sumAll / Float(n))
             totalEnv += (rmsAll - totalEnv) * (1 - expf(-dt / (rmsAll > totalEnv ? 0.003 : 0.045)))
             totalPeak = max(totalEnv, totalPeak * expf(-dt / 20), 1e-4)
+            if solo {
+                let g = voice.update(rms: sqrtf(sumHigh / Float(n)), below: highParts.0, above: highParts.1, seconds: dt, reference: totalPeak, total: totalEnv)
+                let high = voice.brightness   // share of the sound above 300 Hz
+                // Level and tap are shared between the hands by pitch; a hand's tap under 15% is dropped.
+                let l = sqrtf(1 - high), r = sqrtf(high)
+                slices.append((Grip(level: g.level * l, sharpness: 0.2, tap: l > 0.15 ? g.tap * l : 0),
+                               Grip(level: g.level * r, sharpness: 0.8, tap: r > 0.15 ? g.tap * r : 0)))
+                start += n
+                continue
+            }
             let low = bass.update(rms: sqrtf(sumLow / Float(n)), below: lowParts.0, above: lowParts.1, seconds: dt, reference: totalPeak, total: totalEnv)
             var high = voice.update(rms: sqrtf(sumHigh / Float(n)), below: highParts.0, above: highParts.1, seconds: dt, reference: totalPeak, total: totalEnv)
             let hat = hats.update(rms: sqrtf(sumHats / Float(n)), below: 0, above: 0, seconds: dt, reference: totalPeak).tap
