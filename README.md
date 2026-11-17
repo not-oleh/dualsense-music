@@ -1,6 +1,6 @@
 # DualSense Music
 
-Turns the audio playing on your Mac into vibration on a PS5 DualSense controller. A hobby project.
+Turns the audio playing on your Mac into vibration on a PS5 DualSense controller.
 
 - **Left grip:** bass (below ~120 Hz).
 - **Right grip:** voice and melody (~300 to 3000 Hz).
